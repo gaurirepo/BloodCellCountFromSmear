@@ -15,7 +15,7 @@ DATA_YAML = "data.yaml"
 MODEL_NAME = "yolo26n.pt"
 
 # Small quick experiment
-EPOCHS = 5
+EPOCHS = 3
 IMAGE_SIZE = 640
 
 # --------------------------------------------------

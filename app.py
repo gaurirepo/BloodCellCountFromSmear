@@ -1,12 +1,61 @@
 import streamlit as st
-
 from ultralytics import YOLO
-
+from pathlib import Path
 from PIL import Image
+import tempfile
+import os
 
-from collections import Counter
+# ============================================================
+# BLOOD CELL AI DETECTOR
+# YOLO26
+# ============================================================
 
-import numpy as np
+# ------------------------------------------------------------
+# PROJECT DIRECTORY
+# ------------------------------------------------------------
+
+PROJECT_DIR = Path(__file__).resolve().parent
+
+
+# ============================================================
+# MODEL CONFIGURATION
+# ============================================================
+
+# ------------------------------------------------------------
+# CURRENTLY USE QUICK-TEST MODEL
+# ------------------------------------------------------------
+# Use this while testing the app BEFORE full training.
+# ------------------------------------------------------------
+
+MODEL_PATH = (
+        PROJECT_DIR
+        / "runs"
+        / "detect"
+        / "runs"
+        / "yolo26"
+        / "quick_test"
+        / "weights"
+        / "best.pt"
+)
+
+# ------------------------------------------------------------
+# AFTER FULL TRAINING, CHANGE TO:
+#
+# MODEL_PATH = (
+#     PROJECT_DIR
+#     / "runs"
+#     / "detect"
+#     / "runs"
+#     / "yolo26"
+#     / "full_training"
+#     / "weights"
+#     / "best.pt"
+# )
+# ------------------------------------------------------------
+
+
+CONFIDENCE = 0.50
+IMAGE_SIZE = 640
 
 
 # ============================================================
@@ -14,11 +63,8 @@ import numpy as np
 # ============================================================
 
 st.set_page_config(
-
-    page_title="Blood Cell Smear Tracker",
-
-    page_icon="🔬",
-
+    page_title="Blood Cell AI Detector",
+    page_icon="🩸",
     layout="wide"
 )
 
@@ -27,20 +73,46 @@ st.set_page_config(
 # TITLE
 # ============================================================
 
-st.title(
-    "🔬 Real-Time Microscopic Smear Tracker"
+st.title("🩸 Blood Cell AI Detector")
+
+st.markdown(
+    """
+    ### YOLO26 Microscopic Blood Smear Analysis
+
+    Upload **any original microscope image** of a blood smear.
+
+    The AI will automatically:
+
+    - 🔴 Detect and count RBCs
+    - ⚪ Detect and count WBCs
+    - 🟣 Detect and count Platelets
+    - 🔲 Draw bounding boxes around detected cells
+    - 📊 Display the total number of detected cells
+    """
 )
 
-st.write(
-    "AI-powered detection and counting of "
-    "RBCs, WBCs and platelets."
-)
+st.divider()
 
 
-st.warning(
-    "Research prototype only — this tool is "
-    "not a medical diagnostic device."
-)
+# ============================================================
+# CHECK MODEL
+# ============================================================
+
+if not MODEL_PATH.exists():
+
+    st.error(
+        f"""
+        ⚠️ YOLO26 model was not found.
+
+        Expected location:
+
+        `{MODEL_PATH}`
+
+        Please make sure the model exists.
+        """
+    )
+
+    st.stop()
 
 
 # ============================================================
@@ -50,28 +122,75 @@ st.warning(
 @st.cache_resource
 def load_model():
 
-    return YOLO(
-        "runs/detect/"
-        "blood_cell_detector/"
-        "weights/model.pt"
+    return YOLO(str(MODEL_PATH))
+
+
+try:
+
+    model = load_model()
+
+except Exception as e:
+
+    st.error(f"Could not load YOLO26 model: {e}")
+
+    st.stop()
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+st.sidebar.header("🤖 Model Information")
+
+st.sidebar.write("Model: YOLO26n")
+
+st.sidebar.write(
+    f"Confidence threshold: {CONFIDENCE}"
+)
+
+st.sidebar.write(
+    f"Image size: {IMAGE_SIZE}"
+)
+
+st.sidebar.write("")
+
+st.sidebar.write("Classes:")
+
+st.sidebar.write(
+    """
+    ⚪ WBC  
+    🔴 RBC  
+    🟣 Platelets
+    """
+)
+
+
+# ============================================================
+# MODEL CLASSES
+# ============================================================
+
+st.sidebar.header("Model Classes")
+
+for class_id, class_name in model.names.items():
+
+    st.sidebar.write(
+        f"{class_id} → {class_name}"
     )
-
-
-model = load_model()
 
 
 # ============================================================
 # UPLOAD IMAGE
 # ============================================================
 
+st.subheader("📷 Upload Original Blood Smear Image")
+
 uploaded_file = st.file_uploader(
-
-    "Upload a microscope blood-smear image",
-
+    "Choose a microscope image",
     type=[
         "jpg",
         "jpeg",
-        "png"
+        "png",
+        "bmp"
     ]
 )
 
@@ -82,43 +201,60 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
+    # --------------------------------------------------------
+    # OPEN ORIGINAL IMAGE
+    # --------------------------------------------------------
+
     image = Image.open(
         uploaded_file
     ).convert("RGB")
 
 
-    st.subheader(
-        "Original Microscope Image"
-    )
+    # --------------------------------------------------------
+    # DISPLAY ORIGINAL IMAGE
+    # --------------------------------------------------------
 
+    st.subheader("📷 Original Image")
 
     st.image(
         image,
+        caption="Uploaded microscope image",
         use_container_width=True
     )
 
 
     # --------------------------------------------------------
-    # ANALYZE BUTTON
+    # SAVE TEMPORARY IMAGE
     # --------------------------------------------------------
 
-    if st.button(
-            "🔬 Analyze Blood Smear",
-            type="primary"
-    ):
+    temp_path = None
 
+    try:
+
+        with tempfile.NamedTemporaryFile(
+                suffix=".png",
+                delete=False
+        ) as temp_file:
+
+            image.save(
+                temp_file.name
+            )
+
+            temp_path = temp_file.name
+
+
+        # ====================================================
+        # RUN YOLO
+        # ====================================================
 
         with st.spinner(
-                "AI is analyzing the blood smear..."
+                "🔬 YOLO26 is analyzing the blood smear..."
         ):
 
-
             results = model.predict(
-
-                source=np.array(image),
-
-                conf=0.50,
-
+                source=temp_path,
+                imgsz=IMAGE_SIZE,
+                conf=CONFIDENCE,
                 verbose=False
             )
 
@@ -127,165 +263,280 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # ANNOTATED IMAGE
+        # COUNT CELLS
+        # ====================================================
+
+        counts = {
+            "WBC": 0,
+            "RBC": 0,
+            "Platelets": 0
+        }
+
+
+        # ----------------------------------------------------
+        # MODEL CLASS NAMES
+        # ----------------------------------------------------
+
+        names = model.names
+
+
+        # ----------------------------------------------------
+        # COUNT EACH DETECTION
+        # ----------------------------------------------------
+
+        if (
+                result.boxes is not None
+                and len(result.boxes) > 0
+        ):
+
+            for i in range(
+                    len(result.boxes)
+            ):
+
+                class_id = int(
+                    result.boxes.cls[i]
+                )
+
+                confidence = float(
+                    result.boxes.conf[i]
+                )
+
+                class_name = names[
+                    class_id
+                ]
+
+
+                if class_name in counts:
+
+                    counts[
+                        class_name
+                    ] += 1
+
+
+        # ====================================================
+        # TOTAL CELL COUNT
+        # ====================================================
+
+        total_cells = (
+                counts["WBC"]
+                + counts["RBC"]
+                + counts["Platelets"]
+        )
+
+
+        # ====================================================
+        # CREATE TAGGED IMAGE
         # ====================================================
 
         annotated_image = result.plot()
 
 
-        st.subheader(
-            "Detected Cells"
-        )
+        # ----------------------------------------------------
+        # YOLO returns BGR.
+        # Streamlit expects RGB.
+        # ----------------------------------------------------
 
-
-        st.image(
-            annotated_image,
-            channels="BGR",
-            use_container_width=True
+        annotated_image = (
+            annotated_image[:, :, ::-1]
         )
 
 
         # ====================================================
-        # COUNT CELLS
+        # DISPLAY RESULTS
         # ====================================================
 
-        counts = Counter()
+        st.divider()
+
+        st.subheader("🔬 AI Detection")
 
 
-        if result.boxes is not None:
-
-            for cls in result.boxes.cls:
-
-                class_id = int(
-                    cls
-                )
-
-                class_name = model.names[
-                    class_id
-                ]
-
-                counts[
-                    class_name
-                ] += 1
-
-
-        # ====================================================
-        # DISPLAY COUNTS
-        # ====================================================
-
-        st.subheader(
-            "🩸 Cell Count"
+        image_column, results_column = st.columns(
+            [2, 1]
         )
 
 
-        col1, col2, col3, col4 = (
-            st.columns(4)
-        )
+        # ====================================================
+        # TAGGED IMAGE
+        # ====================================================
 
+        with image_column:
 
-        col1.metric(
-
-            "RBC",
-
-            counts.get(
-                "RBC",
-                0
+            st.markdown(
+                "### 🏷️ AI Tagged Image"
             )
+
+            st.image(
+                annotated_image,
+                caption="YOLO26 detected cells",
+                use_container_width=True
+            )
+
+
+        # ====================================================
+        # CELL COUNTS
+        # ====================================================
+
+        with results_column:
+
+            st.markdown(
+                "### 📊 Predicted Cell Count"
+            )
+
+
+            st.metric(
+                "⚪ WBC",
+                counts["WBC"]
+            )
+
+
+            st.metric(
+                "🔴 RBC",
+                counts["RBC"]
+            )
+
+
+            st.metric(
+                "🟣 Platelets",
+                counts["Platelets"]
+            )
+
+
+            st.divider()
+
+
+            st.metric(
+                "🩸 Total Cells",
+                total_cells
+            )
+
+
+            st.divider()
+
+
+            st.markdown(
+                "### 🤖 Prediction Settings"
+            )
+
+
+            st.write(
+                f"Confidence: {CONFIDENCE}"
+            )
+
+
+            st.write(
+                f"Image size: {IMAGE_SIZE}"
+            )
+
+
+        # ====================================================
+        # DETECTION SUMMARY
+        # ====================================================
+
+        st.divider()
+
+        st.subheader(
+            "📋 Detection Summary"
         )
 
 
-        col2.metric(
+        summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(
+            4
+        )
 
-            "WBC",
 
-            counts.get(
+        with summary_col1:
+
+            st.metric(
                 "WBC",
-                0
+                counts["WBC"]
             )
-        )
 
 
-        col3.metric(
+        with summary_col2:
 
-            "Platelets",
+            st.metric(
+                "RBC",
+                counts["RBC"]
+            )
 
-            counts.get(
+
+        with summary_col3:
+
+            st.metric(
                 "Platelets",
-                0
+                counts["Platelets"]
             )
-        )
 
 
-        total = sum(
-            counts.values()
-        )
+        with summary_col4:
 
-
-        col4.metric(
-
-            "Total Cells",
-
-            total
-        )
+            st.metric(
+                "Total",
+                total_cells
+            )
 
 
         # ====================================================
-        # DETAILS
+        # MANUAL VERIFICATION
         # ====================================================
+
+        st.divider()
 
         st.subheader(
-            "Detection Summary"
+            "👁️ Manual Verification"
         )
 
 
-        st.write(
-            f"Total detected cells: **{total}**"
-        )
+        st.info(
+            """
+            The boxes drawn on the image represent the cells
+            detected by YOLO26.
 
+            Check the tagged image to visually verify:
 
-        st.write(
-            f"RBC: **{counts.get('RBC', 0)}**"
-        )
-
-
-        st.write(
-            f"WBC: **{counts.get('WBC', 0)}**"
-        )
-
-
-        st.write(
-            f"Platelets: **"
-            f"{counts.get('Platelets', 0)}**"
+            • Whether each detected cell is real  
+            • Whether the cell type is correct  
+            • Whether any cells were missed  
+            • Whether multiple cells were incorrectly grouped
+            """
         )
 
 
         # ====================================================
-        # CONFIDENCE INFORMATION
+        # SUCCESS MESSAGE
         # ====================================================
 
-        if result.boxes is not None:
+        st.success(
+            f"""
+            Analysis complete!
 
-            confidences = (
-                result.boxes.conf
-                .cpu()
-                .numpy()
-            )
+            YOLO26 detected **{total_cells} cells**:
+            **{counts["WBC"]} WBC + {counts["RBC"]} RBC + {counts["Platelets"]} Platelets**
+            """
+        )
 
 
-            if len(confidences) > 0:
+    except Exception as e:
 
-                average_confidence = (
-                    float(
-                        np.mean(
-                            confidences
-                        )
-                    )
+        st.error(
+            f"❌ Error while processing image: {e}"
+        )
+
+
+    finally:
+
+        # ----------------------------------------------------
+        # DELETE TEMPORARY FILE
+        # ----------------------------------------------------
+
+        if temp_path is not None:
+
+            try:
+
+                os.remove(
+                    temp_path
                 )
 
+            except Exception:
 
-                st.metric(
-
-                    "Average Detection Confidence",
-
-                    f"{average_confidence:.1%}"
-                )
+                pass
