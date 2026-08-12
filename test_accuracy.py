@@ -15,7 +15,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 # MODEL
 # --------------------------------------------------
 
-MODEL_PATH = PROJECT_DIR / "best.pt"
+MODEL_PATH = PROJECT_DIR / "model.pt"
 
 # Change this later to the YOLO26 model you want to test
 # For now, if best.pt is your current trained model,

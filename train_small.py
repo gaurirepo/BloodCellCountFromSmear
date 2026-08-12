@@ -107,5 +107,5 @@ print("=" * 60)
 print("\nModel should be here:")
 
 print(
-    "runs/yolo26/quick_test/weights/best.pt"
+    "runs/yolo26/quick_test/weights/model.pt"
 )
