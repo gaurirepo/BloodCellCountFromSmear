@@ -1,0 +1,12 @@
+path: Dataset
+
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 3
+
+names:
+  0: WBC
+  1: RBC
+  2: Platelets
