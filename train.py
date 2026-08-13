@@ -105,12 +105,12 @@ print("\nBest Trained model:")
 
 print(
     PROJECT_DIR /
-    "runs/detect/runs/yolo26/full_training/weights/best.pt"
+    "runs/yolo26/full_training/weights/best.pt"
 )
 
 print("\nLast model:")
 
 print(
     PROJECT_DIR /
-    "runs/detect/runs/yolo26/full_training/weights/last.pt"
+    "runs/yolo26/full_training/weights/last.pt"
 )

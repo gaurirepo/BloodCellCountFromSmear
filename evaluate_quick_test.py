@@ -15,10 +15,8 @@ PROJECT_DIR = Path(__file__).resolve().parent
 MODEL_PATH = (
         PROJECT_DIR
         / "runs"
-        / "detect"
-        / "runs"
         / "yolo26"
-        / "quick_test"
+        / "full_training"
         / "weights"
         / "best.pt"
 )
