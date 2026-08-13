@@ -1,4 +1,4 @@
-path: Dataset
+path: DataSet
 
 train: train/images
 val: valid/images
