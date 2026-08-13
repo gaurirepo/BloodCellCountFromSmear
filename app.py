@@ -1,7 +1,7 @@
 import streamlit as st
 from ultralytics import YOLO
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import tempfile
 import os
 import pandas as pd
@@ -15,7 +15,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 
 
 # ============================================================
-# MODEL CONFIGURATION
+# FINAL MODEL
 # ============================================================
 
 MODEL_PATH = (
@@ -24,28 +24,83 @@ MODEL_PATH = (
         / "detect"
         / "runs"
         / "yolo26"
-        / "corrected_20_retrain-3"
+        / "full_training_from_corrected-2"
         / "weights"
         / "best.pt"
 )
 
-CONFIDENCE = 0.50
-IMAGE_SIZE = 320
+
+# ============================================================
+# CLASS-SPECIFIC CONFIDENCE THRESHOLDS
+# ============================================================
+#
+# YOLO first returns predictions using the LOWEST threshold.
+# We then apply a separate acceptance threshold for each class.
+#
+# These are currently experimental application thresholds.
+# They are NOT the thresholds used to calculate mAP.
+# ============================================================
+
+CLASS_THRESHOLDS = {
+    "RBC": 0.60,
+    "WBC": 0.40,
+    "Platelets": 0.40,
+}
+
+MIN_CONFIDENCE = min(CLASS_THRESHOLDS.values())
+
+IMAGE_SIZE = 640
 
 
 # ============================================================
-# PAGE CONFIGURATION
+# FINAL TEST-SET PERFORMANCE
+# 36 unseen test images
+# 471 annotated instances
+# ============================================================
+
+FINAL_MAP50 = 85.40
+FINAL_MAP5095 = 60.07
+FINAL_PRECISION = 82.46
+
+RBC_MAP50 = 85.40
+WBC_MAP50 = 96.90
+PLATELET_MAP50 = 73.90
+
+RBC_PRECISION = 76.10
+WBC_PRECISION = 97.20
+PLATELET_PRECISION = 74.20
+
+
+# ============================================================
+# ORIGINAL BASELINE
+# ============================================================
+
+BASELINE_MAP50 = 81.81
+BASELINE_MAP5095 = 56.47
+BASELINE_PRECISION = 71.74
+
+BASELINE_RBC_MAP50 = 83.40
+BASELINE_WBC_MAP50 = 96.90
+BASELINE_PLATELET_MAP50 = 65.10
+
+BASELINE_RBC_PRECISION = 61.00
+BASELINE_WBC_PRECISION = 95.00
+BASELINE_PLATELET_PRECISION = 59.20
+
+
+# ============================================================
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
     page_title="Blood Cell AI Detector",
     page_icon="🩸",
-    layout="wide"
+    layout="wide",
 )
 
 
 # ============================================================
-# SIMPLE UI STYLING
+# STYLING
 # ============================================================
 
 st.markdown(
@@ -53,46 +108,45 @@ st.markdown(
     <style>
 
     .block-container {
-        padding-top: 2rem;
+        padding-top: 1.4rem;
         padding-bottom: 3rem;
-        max-width: 1400px;
+        max-width: 1150px;
     }
 
     .subtitle {
         font-size: 18px;
         color: #6c757d;
         margin-top: -10px;
-        margin-bottom: 25px;
+        margin-bottom: 20px;
     }
 
-    .section-note {
-        color: #6c757d;
-        font-size: 14px;
-        margin-top: -8px;
-        margin-bottom: 18px;
+    .info-box {
+        padding: 14px 18px;
+        border-radius: 10px;
+        background-color: rgba(0, 123, 255, 0.06);
+        margin-bottom: 20px;
     }
 
-    .result-summary {
-        padding: 18px 22px;
-        border-radius: 12px;
-        background-color: rgba(128, 128, 128, 0.08);
-        margin-top: 15px;
-        margin-bottom: 15px;
-        line-height: 1.7;
-    }
-
-    .improvement-box {
+    .result-box {
         padding: 18px 22px;
         border-radius: 12px;
         background-color: rgba(40, 167, 69, 0.08);
-        margin-top: 15px;
-        margin-bottom: 15px;
+        border-left: 5px solid #28a745;
+        margin-top: 18px;
         line-height: 1.7;
+    }
+
+    .threshold-box {
+        padding: 12px 16px;
+        border-radius: 10px;
+        background-color: rgba(255, 193, 7, 0.08);
+        margin-top: 8px;
+        margin-bottom: 18px;
     }
 
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 
@@ -104,7 +158,7 @@ if not MODEL_PATH.exists():
 
     st.error(
         f"""
-        ⚠️ YOLO26 model was not found.
+        Final model could not be found.
 
         Expected location:
 
@@ -128,7 +182,7 @@ try:
     model = load_model()
 
 except Exception as e:
-    st.error(f"Could not load YOLO26 model: {e}")
+    st.error(f"Could not load model: {e}")
     st.stop()
 
 
@@ -141,16 +195,27 @@ st.title("🩸 Blood Cell AI Detector")
 st.markdown(
     """
     <div class="subtitle">
-        AI-powered microscopic blood smear analysis using YOLO26
+        AI-powered microscopic blood smear analysis using YOLO26n
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
-st.write(
-    "Upload a microscopic blood smear image to automatically detect "
-    "and count **Red Blood Cells (RBCs), White Blood Cells (WBCs), "
-    "and Platelets**."
+
+st.markdown(
+    """
+    <div class="info-box">
+
+    <b>Final Retrained YOLO26n Model</b><br>
+
+    Detects and counts
+    <b>Red Blood Cells (RBCs)</b>,
+    <b>White Blood Cells (WBCs)</b>
+    and <b>Platelets</b>.
+
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
 
@@ -160,40 +225,73 @@ st.write(
 
 with st.sidebar:
 
-    st.header("🤖 Model")
+    st.header("🤖 Final Model")
 
-    st.write("**YOLO26n Blood Cell Detector**")
+    st.success("Full-Dataset Retrained Model")
+
+    st.metric(
+        "mAP@50",
+        f"{FINAL_MAP50:.2f}%"
+    )
+
+    st.metric(
+        "Precision",
+        f"{FINAL_PRECISION:.2f}%"
+    )
 
     st.divider()
 
-    st.caption("Prediction Settings")
+    st.subheader("🎯 Class Thresholds")
 
-    st.write(f"Confidence threshold: **{CONFIDENCE:.0%}**")
-    st.write(f"Input image size: **{IMAGE_SIZE}px**")
+    st.write(
+        f"🔴 RBC: **{CLASS_THRESHOLDS['RBC']:.0%}**"
+    )
+
+    st.write(
+        f"🔵 WBC: **{CLASS_THRESHOLDS['WBC']:.0%}**"
+    )
+
+    st.write(
+        f"🟡 Platelets: **{CLASS_THRESHOLDS['Platelets']:.0%}**"
+    )
+
+    st.caption(
+        "Class-specific thresholds control which "
+        "predictions are displayed by the application."
+    )
 
     st.divider()
 
-    st.caption("Detected Classes")
+    st.caption("Inference Settings")
 
-    st.write("🔵 **WBC** — White Blood Cells")
-    st.write("🔴 **RBC** — Red Blood Cells")
-    st.write("🟡 **Platelets**")
+    st.write(
+        f"Image size: **{IMAGE_SIZE}px**"
+    )
+
+    st.write(
+        f"Minimum YOLO confidence: "
+        f"**{MIN_CONFIDENCE:.0%}**"
+    )
 
     st.divider()
 
     with st.expander("Technical Details"):
 
         st.write("Model path:")
+
         st.code(str(MODEL_PATH))
 
-        st.write("Class mapping:")
+        st.write("YOLO class mapping:")
 
         for class_id, class_name in model.names.items():
-            st.write(f"{class_id} → {class_name}")
+
+            st.write(
+                f"{class_id} → {class_name}"
+            )
 
 
 # ============================================================
-# IMAGE UPLOAD
+# FILE UPLOAD
 # ============================================================
 
 st.divider()
@@ -201,8 +299,8 @@ st.divider()
 st.subheader("📤 Upload Blood Smear Image")
 
 uploaded_file = st.file_uploader(
-    "Select a JPG, JPEG, PNG, or BMP microscopic image",
-    type=["jpg", "jpeg", "png", "bmp"]
+    "Select a microscopic blood smear image",
+    type=["jpg", "jpeg", "png", "bmp"],
 )
 
 
@@ -212,14 +310,16 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
-    image = Image.open(uploaded_file).convert("RGB")
+    image = Image.open(
+        uploaded_file
+    ).convert("RGB")
 
     temp_path = None
 
     try:
 
         # ----------------------------------------------------
-        # SAVE TEMPORARY IMAGE
+        # SAVE TEMP IMAGE
         # ----------------------------------------------------
 
         with tempfile.NamedTemporaryFile(
@@ -228,6 +328,7 @@ if uploaded_file is not None:
         ) as temp_file:
 
             image.save(temp_file.name)
+
             temp_path = temp_file.name
 
 
@@ -235,57 +336,145 @@ if uploaded_file is not None:
         # RUN YOLO
         # ====================================================
 
-        with st.spinner("🔬 Analysing blood smear..."):
+        with st.spinner(
+                "🔬 Analysing blood smear..."
+        ):
 
             results = model.predict(
                 source=temp_path,
                 imgsz=IMAGE_SIZE,
-                conf=CONFIDENCE,
-                verbose=False
+
+                # Important:
+                # YOLO returns all candidates >= lowest
+                # class-specific threshold.
+                conf=MIN_CONFIDENCE,
+
+                verbose=False,
             )
+
 
         result = results[0]
 
 
         # ====================================================
-        # COUNT DETECTED CELLS
+        # FILTER DETECTIONS BY CLASS
+        # ============================================================
+
+        accepted_detections = []
+
+        rejected_detections = []
+
+
+        if (
+                result.boxes is not None
+                and len(result.boxes) > 0
+        ):
+
+            for i in range(len(result.boxes)):
+
+                class_id = int(
+                    result.boxes.cls[i]
+                )
+
+                confidence = float(
+                    result.boxes.conf[i]
+                )
+
+                class_name = model.names[
+                    class_id
+                ]
+
+                threshold = CLASS_THRESHOLDS.get(
+                    class_name,
+                    MIN_CONFIDENCE
+                )
+
+
+                box = result.boxes.xyxy[i].tolist()
+
+
+                detection = {
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "confidence": confidence,
+                    "box": box,
+                }
+
+
+                if confidence >= threshold:
+
+                    accepted_detections.append(
+                        detection
+                    )
+
+                else:
+
+                    rejected_detections.append(
+                        detection
+                    )
+
+
         # ====================================================
+        # COUNT ACCEPTED DETECTIONS
+        # ============================================================
 
         counts = {
             "WBC": 0,
             "RBC": 0,
-            "Platelets": 0
+            "Platelets": 0,
         }
 
-        confidence_values = []
 
-        if result.boxes is not None and len(result.boxes) > 0:
-
-            for i in range(len(result.boxes)):
-
-                class_id = int(result.boxes.cls[i])
-                confidence = float(result.boxes.conf[i])
-
-                class_name = model.names[class_id]
-
-                if class_name in counts:
-
-                    counts[class_name] += 1
-                    confidence_values.append(confidence)
+        class_confidences = {
+            "WBC": [],
+            "RBC": [],
+            "Platelets": [],
+        }
 
 
-        total_cells = sum(counts.values())
+        all_confidences = []
+
+
+        for detection in accepted_detections:
+
+            class_name = detection[
+                "class_name"
+            ]
+
+            confidence = detection[
+                "confidence"
+            ]
+
+
+            if class_name in counts:
+
+                counts[class_name] += 1
+
+                class_confidences[
+                    class_name
+                ].append(
+                    confidence
+                )
+
+                all_confidences.append(
+                    confidence
+                )
+
+
+        total_cells = sum(
+            counts.values()
+        )
 
 
         # ====================================================
-        # AVERAGE DETECTION CONFIDENCE
-        # ====================================================
+        # AVERAGE CONFIDENCE
+        # ============================================================
 
-        if confidence_values:
+        if all_confidences:
 
             average_confidence = (
-                    sum(confidence_values)
-                    / len(confidence_values)
+                    sum(all_confidences)
+                    / len(all_confidences)
             )
 
         else:
@@ -294,34 +483,130 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # CREATE ANNOTATED IMAGE
+        # CREATE CUSTOM ANNOTATED IMAGE
+        #
+        # We draw ONLY detections that passed their
+        # class-specific threshold.
+        # ============================================================
+
+        annotated_image = image.copy()
+
+        draw = ImageDraw.Draw(
+            annotated_image
+        )
+
+
+        # Colors:
+        # WBC       = Blue
+        # RBC       = Red
+        # Platelets = Yellow
+
+        CLASS_COLORS = {
+            "WBC": (0, 102, 255),
+            "RBC": (255, 60, 60),
+            "Platelets": (255, 200, 0),
+        }
+
+
+        for detection in accepted_detections:
+
+            class_name = detection[
+                "class_name"
+            ]
+
+            confidence = detection[
+                "confidence"
+            ]
+
+            x1, y1, x2, y2 = detection[
+                "box"
+            ]
+
+
+            color = CLASS_COLORS.get(
+                class_name,
+                (0, 255, 0)
+            )
+
+
+            # Bounding box
+
+            draw.rectangle(
+                [
+                    int(x1),
+                    int(y1),
+                    int(x2),
+                    int(y2)
+                ],
+                outline=color,
+                width=3,
+            )
+
+
+            # Label
+
+            label = (
+                f"{class_name} "
+                f"{confidence:.2f}"
+            )
+
+
+            text_x = int(x1)
+
+            text_y = max(
+                0,
+                int(y1) - 18
+            )
+
+
+            # Label background
+
+            try:
+
+                bbox = draw.textbbox(
+                    (text_x, text_y),
+                    label
+                )
+
+                draw.rectangle(
+                    bbox,
+                    fill=color
+                )
+
+            except Exception:
+
+                pass
+
+
+            draw.text(
+                (text_x, text_y),
+                label,
+                fill=(255, 255, 255),
+            )
+
+
         # ====================================================
+        # DETECTION RESULTS
+        # ============================================================
 
-        annotated_image = result.plot()
+        st.divider()
 
-        # YOLO returns BGR.
-        # Streamlit expects RGB.
-        annotated_image = annotated_image[:, :, ::-1]
+        st.subheader(
+            "🔬 Detection Results"
+        )
+
+
+        st.markdown(
+            """
+            Compare the original microscope image with
+            the AI-detected image for visual verification.
+            """
+        )
 
 
         # ====================================================
         # SIDE-BY-SIDE IMAGES
-        # ====================================================
-
-        st.divider()
-
-        st.subheader("🔬 Detection Results")
-
-        st.markdown(
-            """
-            <div class="section-note">
-                Compare the original microscope image with the
-                AI-detected image for visual verification.
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
+        # ============================================================
 
         original_col, detected_col = st.columns(
             2,
@@ -331,270 +616,359 @@ if uploaded_file is not None:
 
         with original_col:
 
-            st.markdown("#### Original Image")
+            st.markdown(
+                "#### Original Image"
+            )
 
             st.image(
                 image,
                 caption="Uploaded blood smear",
-                use_container_width=True
+                width=500,
             )
 
 
         with detected_col:
 
-            st.markdown("#### AI Detected Image")
+            st.markdown(
+                "#### AI Detected Image"
+            )
 
             st.image(
                 annotated_image,
-                caption="YOLO26 detected cells",
-                use_container_width=True
+                caption=(
+                    "Final YOLO26n prediction "
+                    "with class-specific thresholds"
+                ),
+                width=500,
             )
 
 
         # ====================================================
         # CELL COUNTS
-        # ====================================================
-
-        st.markdown("### 📊 Detected Cell Counts")
-
-
-        wbc_col, rbc_col, platelet_col, total_col = st.columns(4)
-
-
-        with wbc_col:
-
-            st.metric(
-                label="🔵 WBC",
-                value=counts["WBC"]
-            )
-
-
-        with rbc_col:
-
-            st.metric(
-                label="🔴 RBC",
-                value=counts["RBC"]
-            )
-
-
-        with platelet_col:
-
-            st.metric(
-                label="🟡 Platelets",
-                value=counts["Platelets"]
-            )
-
-
-        with total_col:
-
-            st.metric(
-                label="🩸 Total Cells",
-                value=total_cells
-            )
-
-
-        if confidence_values:
-
-            st.caption(
-                f"Average confidence across detected cells: "
-                f"**{average_confidence:.1%}**  •  "
-                f"Detection threshold: **{CONFIDENCE:.0%}**"
-            )
-
-
-        # ====================================================
-        # MODEL PERFORMANCE
-        # ====================================================
-
-        st.divider()
-
-        st.subheader("🎯 Model Accuracy & Detection Performance")
+        # ============================================================
 
         st.markdown(
-            """
-            <div class="section-note">
-                Evaluation results measured on the model validation/test
-                dataset.
-            </div>
-            """,
-            unsafe_allow_html=True
+            "### 📊 Predicted Cell Counts"
         )
 
 
-        # ----------------------------------------------------
-        # HEADLINE METRICS
-        # ----------------------------------------------------
+        col1, col2, col3, col4 = (
+            st.columns(4)
+        )
 
-        metric1, metric2, metric3 = st.columns(3)
+
+        with col1:
+
+            st.metric(
+                "🔵 WBC",
+                counts["WBC"]
+            )
+
+
+        with col2:
+
+            st.metric(
+                "🔴 RBC",
+                counts["RBC"]
+            )
+
+
+        with col3:
+
+            st.metric(
+                "🟡 Platelets",
+                counts["Platelets"]
+            )
+
+
+        with col4:
+
+            st.metric(
+                "🩸 Total Cells",
+                total_cells
+            )
+
+
+        # ====================================================
+        # CONFIDENCE SUMMARY
+        # ============================================================
+
+        if all_confidences:
+
+            st.caption(
+                f"Average confidence of accepted detections: "
+                f"**{average_confidence:.1%}**"
+            )
+
+        # ====================================================
+        # FINAL MODEL PERFORMANCE
+        # ============================================================
+
+        st.divider()
+
+        st.subheader(
+            "🎯 Final Model Performance"
+        )
+
+
+        st.caption(
+            "Evaluated on 36 unseen test images "
+            "containing 471 annotated cell instances."
+        )
+
+
+        metric1, metric2, metric3 = (
+            st.columns(3)
+        )
 
 
         with metric1:
 
             st.metric(
-                label="Overall mAP@50",
-                value="81.74%"
+                "Overall mAP@50",
+                f"{FINAL_MAP50:.2f}%",
+                "+3.59 pts"
             )
 
 
         with metric2:
 
             st.metric(
-                label="Precision",
-                value="78.50%",
-                delta="+6.76 pts"
+                "Precision",
+                f"{FINAL_PRECISION:.2f}%",
+                "+10.72 pts"
             )
 
 
         with metric3:
 
             st.metric(
-                label="WBC mAP@50",
-                value="96.60%"
+                "mAP@50–95",
+                f"{FINAL_MAP5095:.2f}%",
+                "+3.60 pts"
             )
 
 
+        st.caption(
+            "Improvement shown relative to the "
+            "original full-dataset model."
+        )
+
+
         # ====================================================
-        # MODEL PERFORMANCE TABLE
-        # ====================================================
+        # CLASS PERFORMANCE
+        # ============================================================
 
-        performance_data = {
-            "Metric": [
-                "Overall mAP@50",
-                "Precision",
-                "WBC mAP@50",
-                "RBC mAP@50",
-                "Platelet mAP@50"
-            ],
-
-            "Result": [
-                "81.74%",
-                "78.50%",
-                "96.60%",
-                "78.20%",
-                "70.50%"
-            ],
-
-            "Assessment": [
-                "🟢 Strong",
-                "🟢 High Reliability",
-                "🟢 Excellent",
-                "🟢 Strong",
-                "🟢 Good"
-            ]
-        }
+        st.markdown(
+            "### 🧬 Performance by Cell Type"
+        )
 
 
         performance_df = pd.DataFrame(
-            performance_data
+            {
+                "Cell Type": [
+                    "🔵 WBC",
+                    "🔴 RBC",
+                    "🟡 Platelets",
+                ],
+
+                "mAP@50": [
+                    f"{WBC_MAP50:.1f}%",
+                    f"{RBC_MAP50:.1f}%",
+                    f"{PLATELET_MAP50:.1f}%",
+                ],
+
+                "Precision": [
+                    f"{WBC_PRECISION:.1f}%",
+                    f"{RBC_PRECISION:.1f}%",
+                    f"{PLATELET_PRECISION:.1f}%",
+                ],
+
+                "App Threshold": [
+                    f"{CLASS_THRESHOLDS['WBC']:.0%}",
+                    f"{CLASS_THRESHOLDS['RBC']:.0%}",
+                    f"{CLASS_THRESHOLDS['Platelets']:.0%}",
+                ],
+
+                "Assessment": [
+                    "🟢 Excellent",
+                    "🟢 Strong",
+                    "🟢 Strong",
+                ],
+            }
         )
 
 
         st.dataframe(
             performance_df,
             hide_index=True,
-            use_container_width=True
+            use_container_width=True,
         )
 
 
         # ====================================================
-        # RETRAINING IMPROVEMENTS
-        # ====================================================
-
-        st.markdown("### 🚀 Impact of Targeted Retraining")
-
-
-        improvement_col1, improvement_col2 = st.columns(2)
-
-
-        with improvement_col1:
-
-            st.metric(
-                label="Precision",
-                value="78.50%",
-                delta="+6.76 percentage points"
-            )
-
-            st.caption(
-                "Baseline: 71.74% → Retrained: 78.50%"
-            )
-
-
-        with improvement_col2:
-
-            st.metric(
-                label="Platelet mAP@50",
-                value="70.50%",
-                delta="+5.40 percentage points"
-            )
-
-            st.caption(
-                "Baseline: 65.10% → Retrained: 70.50%"
-            )
-
-
-        # ====================================================
-        # KEY RESULT
-        # ====================================================
+        # BASELINE VS FINAL
+        # ============================================================
 
         st.markdown(
-            """
-            <div class="result-summary">
+            "### 🚀 Model Improvement"
+        )
 
-            <b>Key Result</b><br><br>
 
-            The retrained model achieved <b>81.74% overall mAP@50</b>
-            with <b>78.50% precision</b>.
+        improvement_df = pd.DataFrame(
+            {
+                "Metric": [
+                    "Overall mAP@50",
+                    "mAP@50–95",
+                    "Overall Precision",
+                    "RBC mAP@50",
+                    "RBC Precision",
+                    "Platelet mAP@50",
+                    "Platelet Precision",
+                    "WBC mAP@50",
+                    "WBC Precision",
+                ],
 
-            WBC detection remained exceptionally strong at
-            <b>96.60% mAP@50</b>, while targeted retraining improved
-            platelet detection from <b>65.10% → 70.50%</b> and
-            overall precision from <b>71.74% → 78.50%</b>.
+                "Original": [
+                    "81.81%",
+                    "56.47%",
+                    "71.74%",
+                    "83.40%",
+                    "61.00%",
+                    "65.10%",
+                    "59.20%",
+                    "96.90%",
+                    "95.00%",
+                ],
+
+                "Final Retrained": [
+                    "85.40%",
+                    "60.07%",
+                    "82.46%",
+                    "85.40%",
+                    "76.10%",
+                    "73.90%",
+                    "74.20%",
+                    "96.90%",
+                    "97.20%",
+                ],
+
+                "Improvement": [
+                    "+3.59 pts",
+                    "+3.60 pts",
+                    "+10.72 pts",
+                    "+2.00 pts",
+                    "+15.10 pts",
+                    "+8.80 pts",
+                    "+15.00 pts",
+                    "Maintained",
+                    "+2.20 pts",
+                ],
+            }
+        )
+
+
+        st.dataframe(
+            improvement_df,
+            hide_index=True,
+            use_container_width=True,
+        )
+
+
+        # ====================================================
+        # FINAL SUMMARY
+        # ============================================================
+
+        st.markdown(
+            f"""
+            <div class="result-box">
+
+            <b>🏆 Final Result</b><br><br>
+
+            The final retrained YOLO26n achieved
+            <b>85.40% mAP@50</b> and
+            <b>82.46% precision</b> on the
+            independent 36-image test set.
+
+            <br><br>
+
+            For this image, the model detected:
+
+            <br>
+
+            🔵 <b>{counts["WBC"]} WBC</b><br>
+            🔴 <b>{counts["RBC"]} RBC</b><br>
+            🟡 <b>{counts["Platelets"]} Platelets</b><br>
+
+            <br>
+
+            Total:
+            <b>{total_cells} detected cells</b>
 
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
 
         # ====================================================
-        # VISUAL VERIFICATION
-        # ====================================================
+        # OPTIONAL DEBUG INFORMATION
+        # ============================================================
 
-        st.divider()
+        with st.expander(
+                "🔍 View detection confidence details"
+        ):
 
-        st.subheader("👁️ Visual Verification")
+            if accepted_detections:
 
-        st.write(
-            "The side-by-side comparison allows direct visual verification "
-            "of cell localization and classification. Bounding boxes can be "
-            "checked against the original microscopic image to confirm that "
-            "detected RBCs, WBCs, and Platelets correspond to visible cells."
-        )
+                detection_rows = []
+
+                for detection in accepted_detections:
+
+                    detection_rows.append(
+                        {
+                            "Cell Type":
+                                detection["class_name"],
+
+                            "Confidence":
+                                f"{detection['confidence']:.1%}",
+
+                            "Required Threshold":
+                                f"{CLASS_THRESHOLDS.get(detection['class_name'], MIN_CONFIDENCE):.0%}",
+
+                            "Status":
+                                "Accepted",
+                        }
+                    )
 
 
-        st.success(
-            f"""
-            Analysis complete — **{total_cells} cells detected**
+                detection_df = pd.DataFrame(
+                    detection_rows
+                )
 
-            🔵 **{counts["WBC"]} WBC**  •
-            🔴 **{counts["RBC"]} RBC**  •
-            🟡 **{counts["Platelets"]} Platelets**
-            """
-        )
+
+                st.dataframe(
+                    detection_df,
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+            else:
+
+                st.write(
+                    "No detections passed the "
+                    "class-specific thresholds."
+                )
 
 
     except Exception as e:
 
         st.error(
-            f"❌ Error while processing image: {e}"
+            f"Error while processing image: {e}"
         )
 
 
     finally:
-
-        # ----------------------------------------------------
-        # DELETE TEMPORARY FILE
-        # ----------------------------------------------------
 
         if temp_path is not None:
 
@@ -612,5 +986,6 @@ if uploaded_file is not None:
 else:
 
     st.info(
-        "👆 Upload a microscopic blood smear image to start the analysis."
+        "👆 Upload a microscopic blood smear image "
+        "to start the analysis."
     )

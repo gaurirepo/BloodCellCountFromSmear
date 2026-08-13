@@ -6,7 +6,7 @@ OLD_MODEL = "runs/yolo26/full_training/weights/best.pt"
 
 NEW_MODEL = (
     "runs/detect/runs/yolo26/"
-    "corrected_20_retrain-3/weights/best.pt"
+    "full_training_from_corrected-2/weights/best.pt"
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent
