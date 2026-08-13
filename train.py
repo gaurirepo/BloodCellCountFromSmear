@@ -86,7 +86,7 @@ results = model.train(
 
     patience=10,
 
-    workers=2,
+    workers=4,
 
     seed=42,
 

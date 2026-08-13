@@ -1,0 +1,10 @@
+path: ./CorrectedDataSet_20
+train: images/Train
+val: images/Train
+
+nc: 3
+
+names:
+  0: Platelets
+  1: RBC
+  2: WBC
