@@ -1,0 +1,8 @@
+path: /Users/ashima.purohit/Downloads/BloodCellCountFromSmear/CountBloodCells/Dataset
+train: test/images
+val: test/images
+test: test/images
+names:
+  0: Platelets
+  1: RBC
+  2: WBC
