@@ -18,7 +18,7 @@ MODEL_PATH = (
 
 TEST_IMAGES = (
         PROJECT_DIR
-        / "Dataset"
+        / "DataSet"
         / "test"
         / "images"
 )
