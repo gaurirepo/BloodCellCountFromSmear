@@ -1,278 +1,136 @@
-from ultralytics import YOLO
-from pathlib import Path
-
-# ============================================================
-# YOLO26 FULL TRAINED MODEL - BLOOD CELL PREDICTION
-# ============================================================
-
-PROJECT_DIR = Path(__file__).resolve().parent
-
-MODEL_PATH = (
-        PROJECT_DIR
-        / "runs"
-        / "detect"
-        / "runs"
-        / "yolo26"
-        / "full_training_from_corrected-2"
-        / "weights"
-        / "best.pt"
+from eval_config import (
+    CANONICAL_CLASS_NAMES,
+    CLASS_THRESHOLDS,
+    DISPLAY_CLASS_ORDER,
+    IMAGE_SIZE,
+    MIN_INFERENCE_CONF,
+    PROJECT_DIR,
+    assert_canonical_mapping,
+    count_accepted_boxes,
+    empty_class_counts,
+    list_images,
+    resolve_dataset_root,
+    resolve_final_model,
 )
 
-TEST_IMAGES = (
-        PROJECT_DIR
-        / "DataSet"
-        / "test"
-        / "images"
-)
 
-OUTPUT_DIR = (
-        PROJECT_DIR
-        / "runs"
-        / "yolo26_predictions"
-        / "full_training"
-)
+def main() -> None:
+    from ultralytics import YOLO
 
-# Use lower confidence initially so we don't hide WBC detections
-CONFIDENCE = 0.25
+    model_path = resolve_final_model(PROJECT_DIR)
+    test_images = resolve_dataset_root(PROJECT_DIR) / "test" / "images"
+    output_dir = PROJECT_DIR / "runs" / "yolo26_predictions" / "full_training"
 
-# ============================================================
-# CORRECT DATASET CLASS MAPPING
-# ============================================================
+    print("=" * 60)
+    print("YOLO26 FULL TRAINED MODEL - BLOOD CELL PREDICTION")
+    print("=" * 60)
+    print()
+    print("Model:")
+    print(model_path)
+    print()
+    print("Test images:")
+    print(test_images)
+    print()
+    print("Canonical class mapping:")
+    print(CANONICAL_CLASS_NAMES)
+    print()
+    print("Live counting gates (not COCO mAP):")
+    for class_name in DISPLAY_CLASS_ORDER:
+        print(f"  {class_name}: {CLASS_THRESHOLDS[class_name]:.2f}")
 
-EXPECTED_CLASSES = {
-    0: "Platelets",
-    1: "RBC",
-    2: "WBC"
-}
+    if not model_path.exists():
+        raise FileNotFoundError(f"\nERROR: best.pt not found!\n{model_path}")
+    if not test_images.exists():
+        raise FileNotFoundError(
+            f"\nERROR: Test image folder not found!\n{test_images}"
+        )
 
-print("=" * 60)
-print("YOLO26 FULL TRAINED MODEL - BLOOD CELL PREDICTION")
-print("=" * 60)
+    print("\nLoading model...")
+    model = YOLO(str(model_path))
+    print("Model loaded successfully!")
+    print()
+    print("Model classes:")
+    print(model.names)
 
-print()
-print("Model:")
-print(MODEL_PATH)
+    print()
+    print("Checking class mapping...")
+    assert_canonical_mapping(model.names)
+    print("Class mapping verified successfully!")
 
-print()
-print("Test images:")
-print(TEST_IMAGES)
+    images = list_images(test_images)
+    print()
+    print("Number of test images:", len(images))
+    if not images:
+        raise ValueError("No test images found.")
 
-# ============================================================
-# CHECK PATHS
-# ============================================================
-
-if not MODEL_PATH.exists():
-    raise FileNotFoundError(
-        f"\nERROR: best.pt not found!\n{MODEL_PATH}"
-    )
-
-if not TEST_IMAGES.exists():
-    raise FileNotFoundError(
-        f"\nERROR: Test image folder not found!\n{TEST_IMAGES}"
-    )
-
-# ============================================================
-# LOAD MODEL
-# ============================================================
-
-print("\nLoading model...")
-
-model = YOLO(str(MODEL_PATH))
-
-print("Model loaded successfully!")
-
-print()
-print("Model classes:")
-print(model.names)
-
-# ============================================================
-# VERIFY CLASS MAPPING
-# ============================================================
-
-print()
-print("Checking class mapping...")
-
-model_names = {
-    int(k): str(v)
-    for k, v in model.names.items()
-}
-
-print("Expected:")
-print(EXPECTED_CLASSES)
-
-print("Model:")
-print(model_names)
-
-if model_names != EXPECTED_CLASSES:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print()
+    print("Output directory:")
+    print(output_dir)
 
     print()
     print("=" * 60)
-    print("ERROR: CLASS MAPPING DOES NOT MATCH!")
+    print("RUNNING PREDICTIONS")
     print("=" * 60)
 
-    print()
-    print("Expected:")
-    print(EXPECTED_CLASSES)
-
-    print()
-    print("Found in model:")
-    print(model_names)
-
-    print()
-    print("DO NOT use this model for final predictions.")
-    print("Train a fresh model using the corrected data.yaml.")
-
-    raise ValueError("Incorrect class mapping in model.")
-
-print()
-print("Class mapping verified successfully!")
-
-# ============================================================
-# FIND TEST IMAGES
-# ============================================================
-
-image_extensions = {
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".bmp",
-    ".tif",
-    ".tiff"
-}
-
-images = [
-    f
-    for f in TEST_IMAGES.iterdir()
-    if f.is_file()
-       and f.suffix.lower() in image_extensions
-]
-
-images.sort()
-
-print()
-print("Number of test images:", len(images))
-
-if len(images) == 0:
-    raise ValueError("No test images found.")
-
-# ============================================================
-# CREATE OUTPUT DIRECTORY
-# ============================================================
-
-OUTPUT_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-print()
-print("Output directory:")
-print(OUTPUT_DIR)
-
-# ============================================================
-# RUN PREDICTIONS
-# ============================================================
-
-print()
-print("=" * 60)
-print("RUNNING PREDICTIONS")
-print("=" * 60)
-
-results = model.predict(
-    source=str(TEST_IMAGES),
-    conf=CONFIDENCE,
-    imgsz=640,
-
-    # Save annotated images
-    save=True,
-
-    # Save prediction labels as well
-    save_txt=True,
-
-    # Save confidence scores
-    save_conf=True,
-
-    project=str(OUTPUT_DIR.parent),
-    name=OUTPUT_DIR.name,
-    exist_ok=True,
-
-    verbose=True
-)
-
-# ============================================================
-# COUNT CELLS
-# ============================================================
-
-total_wbc = 0
-total_rbc = 0
-total_platelets = 0
-
-print()
-print("=" * 60)
-print("PREDICTION SUMMARY")
-print("=" * 60)
-
-for i, result in enumerate(results):
-
-    wbc = 0
-    rbc = 0
-    platelets = 0
-
-    if result.boxes is not None:
-
-        for cls in result.boxes.cls:
-
-            class_id = int(cls)
-
-            # CORRECT MAPPING
-            if class_id == 0:
-                platelets += 1
-
-            elif class_id == 1:
-                rbc += 1
-
-            elif class_id == 2:
-                wbc += 1
-
-    total_wbc += wbc
-    total_rbc += rbc
-    total_platelets += platelets
-
-    print(
-        f"{i + 1:3}/{len(results)}  "
-        f"WBC={wbc:2}  "
-        f"RBC={rbc:3}  "
-        f"Platelets={platelets:2}"
+    results = model.predict(
+        source=str(test_images),
+        conf=MIN_INFERENCE_CONF,
+        imgsz=IMAGE_SIZE,
+        save=True,
+        save_txt=True,
+        save_conf=True,
+        project=str(output_dir.parent),
+        name=output_dir.name,
+        exist_ok=True,
+        verbose=True,
     )
 
-# ============================================================
-# FINAL TOTALS
-# ============================================================
+    totals = empty_class_counts()
 
-print()
-print("=" * 60)
-print("TOTAL PREDICTIONS")
-print("=" * 60)
+    print()
+    print("=" * 60)
+    print("PREDICTION SUMMARY  (class-specific operating point)")
+    print("=" * 60)
 
-print(f"WBC        : {total_wbc}")
-print(f"RBC        : {total_rbc}")
-print(f"Platelets  : {total_platelets}")
+    for index, result in enumerate(results):
+        if result.boxes is not None and len(result.boxes) > 0:
+            class_ids = [int(value) for value in result.boxes.cls.tolist()]
+            confidences = [float(value) for value in result.boxes.conf.tolist()]
+        else:
+            class_ids = []
+            confidences = []
 
-print()
-print("=" * 60)
-print("OUTPUT")
-print("=" * 60)
+        counts = count_accepted_boxes(class_ids, confidences, model.names)
+        for class_name, value in counts.items():
+            totals[class_name] += value
 
-print()
-print("Annotated images:")
-print(OUTPUT_DIR)
+        print(
+            f"{index + 1:3}/{len(results)}  "
+            f"WBC={counts['WBC']:2}  "
+            f"RBC={counts['RBC']:3}  "
+            f"Platelets={counts['Platelets']:2}"
+        )
 
-print()
-print("Prediction labels:")
-print(OUTPUT_DIR / "labels")
+    print()
+    print("=" * 60)
+    print("TOTAL PREDICTIONS")
+    print("=" * 60)
+    print(f"WBC        : {totals['WBC']}")
+    print(f"RBC        : {totals['RBC']}")
+    print(f"Platelets  : {totals['Platelets']}")
+    print()
+    print("Annotated images:")
+    print(output_dir)
+    print()
+    print("Prediction labels:")
+    print(output_dir / "labels")
+    print()
+    print("YOLO infer confidence:")
+    print(MIN_INFERENCE_CONF)
+    print()
+    print("Done!")
 
-print()
-print("Confidence threshold:")
-print(CONFIDENCE)
 
-print()
-print("Done!")
+if __name__ == "__main__":
+    main()

@@ -15,6 +15,10 @@ SPLITS = [
 ]
 
 
+# TXL-PBC source ID order in this folder. This is NOT the inference map.
+# Canonical training / app / YOLO mapping is:
+#     {0: "Platelets", 1: "RBC", 2: "WBC"}
+# External validation remaps these IDs in validate_txl_pbc.py.
 CLASS_NAMES = {
     0: "WBC",
     1: "RBC",

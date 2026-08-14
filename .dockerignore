@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.pyc
+.idea
+frontend
+DataSet
+Demo
+SmallDataSet
+CorrectedDataSet_20
+*.ipynb
+*.pptx
+*.csv
+.DS_Store
