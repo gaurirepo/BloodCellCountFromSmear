@@ -1,5 +1,7 @@
 const ENGINE = process.env.ENGINE_URL ?? "http://127.0.0.1:8000";
 
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const form = await request.formData();
 

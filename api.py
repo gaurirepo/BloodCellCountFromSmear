@@ -12,6 +12,7 @@ import base64
 import io
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -99,10 +100,21 @@ def image_to_png_base64(image: Image.Image) -> str:
 
 
 def load_model() -> YOLO:
-    model_path = resolve_final_model()
+    env_path = os.getenv("MODEL_PATH")
+    model_path = Path(env_path) if env_path else resolve_final_model()
+    if not model_path.is_file():
+        raise FileNotFoundError(f"YOLO weights not found: {model_path}")
     model = YOLO(str(model_path))
     assert_canonical_mapping(model.names)
     return model
+
+
+def cors_origins() -> list[str]:
+    raw = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 @asynccontextmanager
@@ -119,7 +131,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_origins(),
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
