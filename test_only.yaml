@@ -1,7 +1,8 @@
-path: /Users/ashima.purohit/Downloads/BloodCellCountFromSmear/CountBloodCells/Dataset
+path: DataSet
 train: test/images
 val: test/images
 test: test/images
+nc: 3
 names:
   0: Platelets
   1: RBC

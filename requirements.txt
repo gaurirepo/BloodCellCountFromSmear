@@ -6,3 +6,7 @@ matplotlib
 seaborn
 pillow
 pyyaml
+plotly
+fastapi
+uvicorn
+python-multipart

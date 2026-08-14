@@ -1,5 +1,11 @@
 /.idea/
 /.venv/
+__pycache__/
+*.pyc
+.DS_Store
+frontend/node_modules/
+frontend/.next/
+SmearDx_backend.zip
 /comparison_images/
 /rbc_visual_audit/
 /runs/detect/runs/yolo26/quick_test/args.yaml
